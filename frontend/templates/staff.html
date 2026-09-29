@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Staff{% endblock %}
+{% block heading %}Staff Accounts (Role-Based Access Control){% endblock %}
+{% block content %}
+  <div class="toolbar">
+    <div></div>
+    <button class="primary" id="add-staff-btn">+ Add Staff Account</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Username</th><th>Full Name</th><th>Role</th><th>Status</th><th></th></tr></thead>
+      <tbody id="staff-body"><tr><td colspan="5">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="modal-overlay" id="staff-modal" style="display:none;">
+    <div class="modal">
+      <h2>Add Staff Account</h2>
+      <form id="staff-form">
+        <div class="form-row"><label>Username *</label><input type="text" id="s-username" required></div>
+        <div class="form-row"><label>Password *</label><input type="password" id="s-password" required></div>
+        <div class="form-row"><label>Full Name *</label><input type="text" id="s-name" required></div>
+        <div class="form-row"><label>Role *</label>
+          <select id="s-role" required>
+            <option value="doctor">Doctor</option>
+            <option value="nurse">Nurse</option>
+            <option value="receptionist">Receptionist</option>
+            <option value="billing_staff">Billing Staff</option>
+            <option value="pharmacist">Pharmacist</option>
+            <option value="lab_tech">Lab Technician</option>
+            <option value="admin">Administrator</option>
+          </select>
+        </div>
+        <div class="form-row" id="linked-doctor-row" style="display:none;">
+          <label>Linked Doctor Profile</label>
+          <select id="s-doctor"></select>
+        </div>
+        <div class="error-text" id="staff-error"></div>
+        <div class="modal-actions">
+          <button type="button" id="staff-cancel-btn">Cancel</button>
+          <button type="submit" class="primary">Create Account</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+let staffList = [];
+let doctorOptions = [];
+
+async function loadStaff() {
+  try {
+    staffList = await Api.get("/api/staff");
+    document.getElementById("staff-body").innerHTML = staffList.map(s => `
+      <tr>
+        <td>${escapeHtml(s.username)}</td>
+        <td>${escapeHtml(s.full_name)}</td>
+        <td>${badge(s.role.replace("_", " "), "blue")}</td>
+        <td>${s.is_active ? badge("Active", "green") : badge("Inactive", "gray")}</td>
+        <td><button class="small" onclick="toggleStaff(${s.id})">${s.is_active ? "Deactivate" : "Activate"}</button></td>
+      </tr>`).join("");
+  } catch (err) { if (!handleAuthError(err)) alert(err.message); }
+}
+
+window.toggleStaff = async function (id) {
+  try { await Api.put(`/api/staff/${id}/toggle`, {}); loadStaff(); }
+  catch (err) { alert(err.message); }
+};
+
+const modal = document.getElementById("staff-modal");
+document.getElementById("add-staff-btn").addEventListener("click", async () => {
+  document.getElementById("staff-form").reset();
+  document.getElementById("staff-error").textContent = "";
+  if (!doctorOptions.length) {
+    doctorOptions = await Api.get("/api/doctors");
+    document.getElementById("s-doctor").innerHTML = doctorOptions.map(d => `<option value="${d.id}">${escapeHtml(d.full_name)}</option>`).join("");
+  }
+  modal.style.display = "flex";
+});
+document.getElementById("staff-cancel-btn").addEventListener("click", () => modal.style.display = "none");
+document.getElementById("s-role").addEventListener("change", (e) => {
+  document.getElementById("linked-doctor-row").style.display = e.target.value === "doctor" ? "block" : "none";
+});
+
+document.getElementById("staff-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const role = document.getElementById("s-role").value;
+  const payload = {
+    username: document.getElementById("s-username").value,
+    password: document.getElementById("s-password").value,
+    full_name: document.getElementById("s-name").value,
+    role,
+    linked_doctor_id: role === "doctor" ? Number(document.getElementById("s-doctor").value) : null,
+  };
+  try {
+    await Api.post("/api/staff", payload);
+    modal.style.display = "none";
+    loadStaff();
+  } catch (err) { document.getElementById("staff-error").textContent = err.message; }
+});
+
+loadStaff();
+</script>
+{% endblock %}

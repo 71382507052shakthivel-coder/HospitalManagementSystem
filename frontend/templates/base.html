@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}HMS{% endblock %} · Hospital Management System</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">🏥 MediCore HMS
+      <span>Hospital Management System</span>
+    </div>
+    <nav id="side-nav">
+      <a href="/dashboard" data-page="dashboard">📊 Dashboard</a>
+      <a href="/patients" data-page="patients">🧑‍🤝‍🧑 Patients</a>
+      <a href="/appointments" data-page="appointments">📅 Appointments</a>
+      <a href="/doctors" data-page="doctors" data-roles="admin">🩺 Doctors</a>
+      <a href="/billing" data-page="billing" data-roles="admin,billing_staff,receptionist">💳 Billing</a>
+      <a href="/pharmacy" data-page="pharmacy" data-roles="admin,pharmacist,doctor">💊 Pharmacy</a>
+      <a href="/lab" data-page="lab" data-roles="admin,lab_tech,doctor">🧪 Laboratory</a>
+      <a href="/wards" data-page="wards" data-roles="admin,nurse,receptionist">🛏️ Wards / Beds</a>
+      <a href="/staff" data-page="staff" data-roles="admin">👤 Staff Accounts</a>
+    </nav>
+    <div class="user-box">
+      <div><strong>{{ full_name }}</strong></div>
+      <div class="role-badge">{{ role }}</div>
+      <button id="logout-btn">Log out</button>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <h1>{% block heading %}{% endblock %}</h1>
+      <div id="topbar-extra"></div>
+    </div>
+    <div class="content">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script>
+  // Highlight active nav link + hide links the current role can't use.
+  (function () {
+    const role = "{{ role }}";
+    const path = window.location.pathname.replace("/", "") || "dashboard";
+    document.querySelectorAll("#side-nav a").forEach(a => {
+      if (a.dataset.page === path) a.classList.add("active");
+      const roles = a.dataset.roles;
+      if (roles && !roles.split(",").includes(role)) a.style.display = "none";
+    });
+    document.getElementById("logout-btn").addEventListener("click", async () => {
+      await Api.post("/api/auth/logout", {});
+      window.location.href = "/login";
+    });
+  })();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

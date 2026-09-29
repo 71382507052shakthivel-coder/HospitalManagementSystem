@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Doctors{% endblock %}
+{% block heading %}Doctor Management{% endblock %}
+{% block content %}
+  <div class="toolbar">
+    <div></div>
+    <button class="primary" id="add-doctor-btn">+ Add Doctor</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Name</th><th>Specialization</th><th>Department</th><th>Phone</th><th>Schedule</th><th></th></tr></thead>
+      <tbody id="doctors-body"><tr><td colspan="6">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="modal-overlay" id="doctor-modal" style="display:none;">
+    <div class="modal">
+      <h2 id="doctor-modal-title">Add Doctor</h2>
+      <form id="doctor-form">
+        <input type="hidden" id="d-id">
+        <div class="form-row"><label>Full Name *</label><input type="text" id="d-name" required></div>
+        <div class="form-row"><label>Specialization *</label><input type="text" id="d-spec" required></div>
+        <div class="two-col">
+          <div class="form-row"><label>Phone</label><input type="text" id="d-phone"></div>
+          <div class="form-row"><label>Email</label><input type="email" id="d-email"></div>
+        </div>
+        <div class="form-row"><label>Department</label><input type="text" id="d-dept"></div>
+        <div class="form-row"><label>Schedule</label><input type="text" id="d-schedule" placeholder="e.g. Mon-Fri 9am-4pm"></div>
+        <div class="error-text" id="doctor-error"></div>
+        <div class="modal-actions">
+          <button type="button" id="doctor-cancel-btn">Cancel</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+let doctors = [];
+
+async function loadDoctors() {
+  try {
+    doctors = await Api.get("/api/doctors");
+    document.getElementById("doctors-body").innerHTML = doctors.length ? doctors.map(d => `
+      <tr>
+        <td>${escapeHtml(d.full_name)}</td>
+        <td>${escapeHtml(d.specialization)}</td>
+        <td>${escapeHtml(d.department || "-")}</td>
+        <td>${escapeHtml(d.phone || "-")}</td>
+        <td>${escapeHtml(d.schedule || "-")}</td>
+        <td>
+          <button class="small" onclick="openEditDoctor(${d.id})">Edit</button>
+          <button class="small danger" onclick="deactivateDoctor(${d.id})">Deactivate</button>
+        </td>
+      </tr>`).join("") : `<tr><td colspan="6" class="empty-state">No doctors yet</td></tr>`;
+  } catch (err) { if (!handleAuthError(err)) alert(err.message); }
+}
+
+const modal = document.getElementById("doctor-modal");
+document.getElementById("add-doctor-btn").addEventListener("click", () => {
+  document.getElementById("doctor-modal-title").textContent = "Add Doctor";
+  document.getElementById("doctor-form").reset();
+  document.getElementById("d-id").value = "";
+  modal.style.display = "flex";
+});
+document.getElementById("doctor-cancel-btn").addEventListener("click", () => modal.style.display = "none");
+
+window.openEditDoctor = function (id) {
+  const d = doctors.find(x => x.id === id);
+  if (!d) return;
+  document.getElementById("doctor-modal-title").textContent = "Edit Doctor";
+  document.getElementById("d-id").value = d.id;
+  document.getElementById("d-name").value = d.full_name;
+  document.getElementById("d-spec").value = d.specialization;
+  document.getElementById("d-phone").value = d.phone || "";
+  document.getElementById("d-email").value = d.email || "";
+  document.getElementById("d-dept").value = d.department || "";
+  document.getElementById("d-schedule").value = d.schedule || "";
+  modal.style.display = "flex";
+};
+
+window.deactivateDoctor = async function (id) {
+  if (!confirm("Deactivate this doctor?")) return;
+  try { await Api.del(`/api/doctors/${id}`); loadDoctors(); }
+  catch (err) { alert(err.message); }
+};
+
+document.getElementById("doctor-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = document.getElementById("d-id").value;
+  const payload = {
+    full_name: document.getElementById("d-name").value,
+    specialization: document.getElementById("d-spec").value,
+    phone: document.getElementById("d-phone").value,
+    email: document.getElementById("d-email").value,
+    department: document.getElementById("d-dept").value,
+    schedule: document.getElementById("d-schedule").value,
+  };
+  try {
+    if (id) await Api.put(`/api/doctors/${id}`, payload);
+    else await Api.post("/api/doctors", payload);
+    modal.style.display = "none";
+    loadDoctors();
+  } catch (err) { document.getElementById("doctor-error").textContent = err.message; }
+});
+
+loadDoctors();
+</script>
+{% endblock %}

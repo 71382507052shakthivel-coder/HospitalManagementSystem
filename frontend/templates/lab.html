@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Laboratory{% endblock %}
+{% block heading %}Laboratory Management{% endblock %}
+{% block content %}
+  <div class="toolbar">
+    <div></div>
+    <button class="primary" id="add-test-btn">+ Order Test</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Patient</th><th>Test</th><th>Ordered By</th><th>Ordered Date</th><th>Status</th><th>Result</th><th></th></tr></thead>
+      <tbody id="lab-body"><tr><td colspan="7">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="modal-overlay" id="test-modal" style="display:none;">
+    <div class="modal">
+      <h2>Order Lab Test</h2>
+      <form id="test-form">
+        <div class="form-row"><label>Patient *</label><select id="t-patient" required></select></div>
+        <div class="form-row"><label>Test Name *</label><input type="text" id="t-name" placeholder="e.g. Complete Blood Count" required></div>
+        <div class="error-text" id="test-error"></div>
+        <div class="modal-actions">
+          <button type="button" id="test-cancel-btn">Cancel</button>
+          <button type="submit" class="primary">Order</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="result-modal" style="display:none;">
+    <div class="modal">
+      <h2>Update Test</h2>
+      <form id="result-form">
+        <input type="hidden" id="r-id">
+        <div class="form-row"><label>Status</label>
+          <select id="r-status">
+            <option>Ordered</option><option>Sample Collected</option>
+            <option>In Progress</option><option>Completed</option><option>Cancelled</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Result</label><textarea id="r-result"></textarea></div>
+        <div class="error-text" id="result-error"></div>
+        <div class="modal-actions">
+          <button type="button" id="result-cancel-btn">Cancel</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+const role = "{{ role }}";
+const canUpdate = ["admin", "lab_tech"].includes(role);
+let tests = [];
+
+async function loadTests() {
+  try {
+    tests = await Api.get("/api/lab-tests");
+    document.getElementById("lab-body").innerHTML = tests.length ? tests.map(t => `
+      <tr>
+        <td>${escapeHtml(t.patient_name)} <span style="color:var(--text-muted); font-size:12px;">(${escapeHtml(t.patient_code)})</span></td>
+        <td>${escapeHtml(t.test_name)}</td>
+        <td>${t.doctor_name ? "Dr. " + escapeHtml(t.doctor_name) : "-"}</td>
+        <td>${fmtDate(t.ordered_date)}</td>
+        <td>${badge(t.status, statusColor(t.status))}</td>
+        <td>${escapeHtml(t.result || "-")}</td>
+        <td>${canUpdate ? `<button class="small" onclick="openUpdate(${t.id})">Update</button>` : ""}</td>
+      </tr>`).join("") : `<tr><td colspan="7" class="empty-state">No lab tests ordered</td></tr>`;
+  } catch (err) { if (!handleAuthError(err)) alert(err.message); }
+}
+
+const testModal = document.getElementById("test-modal");
+document.getElementById("add-test-btn").addEventListener("click", async () => {
+  document.getElementById("test-form").reset();
+  document.getElementById("test-error").textContent = "";
+  const patients = await Api.get("/api/patients");
+  document.getElementById("t-patient").innerHTML = patients.map(p => `<option value="${p.id}">${escapeHtml(p.full_name)} (${p.patient_code})</option>`).join("");
+  testModal.style.display = "flex";
+});
+document.getElementById("test-cancel-btn").addEventListener("click", () => testModal.style.display = "none");
+
+document.getElementById("test-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const payload = {
+    patient_id: Number(document.getElementById("t-patient").value),
+    test_name: document.getElementById("t-name").value,
+  };
+  try {
+    await Api.post("/api/lab-tests", payload);
+    testModal.style.display = "none";
+    loadTests();
+  } catch (err) { document.getElementById("test-error").textContent = err.message; }
+});
+
+const resultModal = document.getElementById("result-modal");
+window.openUpdate = function (id) {
+  const t = tests.find(x => x.id === id);
+  if (!t) return;
+  document.getElementById("r-id").value = t.id;
+  document.getElementById("r-status").value = t.status;
+  document.getElementById("r-result").value = t.result || "";
+  resultModal.style.display = "flex";
+};
+document.getElementById("result-cancel-btn").addEventListener("click", () => resultModal.style.display = "none");
+
+document.getElementById("result-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = document.getElementById("r-id").value;
+  const payload = { status: document.getElementById("r-status").value, result: document.getElementById("r-result").value };
+  try {
+    await Api.put(`/api/lab-tests/${id}`, payload);
+    resultModal.style.display = "none";
+    loadTests();
+  } catch (err) { document.getElementById("result-error").textContent = err.message; }
+});
+
+loadTests();
+</script>
+{% endblock %}

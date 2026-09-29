@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Patients{% endblock %}
+{% block heading %}Patient Management{% endblock %}
+{% block content %}
+  <div class="toolbar">
+    <input type="search" id="search-box" placeholder="Search by name or patient code...">
+    <button class="primary" id="add-patient-btn">+ Register Patient</button>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Code</th><th>Name</th><th>Gender</th><th>DOB</th><th>Phone</th>
+          <th>Blood Group</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="patients-body"><tr><td colspan="7">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Add/Edit Patient Modal -->
+  <div class="modal-overlay" id="patient-modal" style="display:none;">
+    <div class="modal">
+      <h2 id="patient-modal-title">Register Patient</h2>
+      <form id="patient-form">
+        <input type="hidden" id="p-id">
+        <div class="form-row"><label>Full Name *</label><input type="text" id="p-name" required></div>
+        <div class="two-col">
+          <div class="form-row"><label>Date of Birth</label><input type="date" id="p-dob"></div>
+          <div class="form-row"><label>Gender</label>
+            <select id="p-gender"><option value="">-</option><option>Male</option><option>Female</option><option>Other</option></select>
+          </div>
+        </div>
+        <div class="two-col">
+          <div class="form-row"><label>Phone</label><input type="text" id="p-phone"></div>
+          <div class="form-row"><label>Blood Group</label><input type="text" id="p-blood" placeholder="e.g. O+"></div>
+        </div>
+        <div class="form-row"><label>Address</label><input type="text" id="p-address"></div>
+        <div class="form-row"><label>Allergies</label><input type="text" id="p-allergies"></div>
+        <div class="form-row"><label>Emergency Contact</label><input type="text" id="p-emergency"></div>
+        <div class="error-text" id="patient-error"></div>
+        <div class="modal-actions">
+          <button type="button" id="patient-cancel-btn">Cancel</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Patient Detail / EHR Modal -->
+  <div class="modal-overlay" id="detail-modal" style="display:none;">
+    <div class="modal" style="width:600px;">
+      <h2 id="detail-title">Patient Record</h2>
+      <div id="detail-body"></div>
+      <div class="modal-actions">
+        <button type="button" id="detail-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+const role = "{{ role }}";
+const canEdit = ["admin", "receptionist", "nurse"].includes(role);
+const isClinical = ["admin", "doctor", "nurse"].includes(role);
+let patients = [];
+
+async function loadPatients(q) {
+  try {
+    const url = q ? `/api/patients?q=${encodeURIComponent(q)}` : "/api/patients";
+    patients = await Api.get(url);
+    renderTable();
+  } catch (err) { if (!handleAuthError(err)) alert(err.message); }
+}
+
+function renderTable() {
+  const body = document.getElementById("patients-body");
+  if (!patients.length) {
+    body.innerHTML = `<tr><td colspan="7" class="empty-state">No patients found</td></tr>`;
+    return;
+  }
+  body.innerHTML = patients.map(p => `
+    <tr>
+      <td>${escapeHtml(p.patient_code)}</td>
+      <td><a href="#" onclick="openDetail(${p.id}); return false;">${escapeHtml(p.full_name)}</a></td>
+      <td>${escapeHtml(p.gender || "-")}</td>
+      <td>${fmtDate(p.dob)}</td>
+      <td>${escapeHtml(p.phone || "-")}</td>
+      <td>${escapeHtml(p.blood_group || "-")}</td>
+      <td>
+        ${canEdit ? `<button class="small" onclick="openEdit(${p.id})">Edit</button>` : ""}
+      </td>
+    </tr>`).join("");
+}
+
+document.getElementById("search-box").addEventListener("input", (e) => {
+  clearTimeout(window._searchTimer);
+  window._searchTimer = setTimeout(() => loadPatients(e.target.value), 250);
+});
+
+// ---------------- Add/Edit modal ----------------
+const modal = document.getElementById("patient-modal");
+function showModal() { modal.style.display = "flex"; }
+function hideModal() { modal.style.display = "none"; document.getElementById("patient-error").textContent = ""; }
+
+document.getElementById("add-patient-btn").addEventListener("click", () => {
+  document.getElementById("patient-modal-title").textContent = "Register Patient";
+  document.getElementById("patient-form").reset();
+  document.getElementById("p-id").value = "";
+  showModal();
+});
+document.getElementById("patient-cancel-btn").addEventListener("click", hideModal);
+
+window.openEdit = function (id) {
+  const p = patients.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById("patient-modal-title").textContent = "Edit Patient";
+  document.getElementById("p-id").value = p.id;
+  document.getElementById("p-name").value = p.full_name || "";
+  document.getElementById("p-dob").value = p.dob || "";
+  document.getElementById("p-gender").value = p.gender || "";
+  document.getElementById("p-phone").value = p.phone || "";
+  document.getElementById("p-blood").value = p.blood_group || "";
+  document.getElementById("p-address").value = p.address || "";
+  document.getElementById("p-allergies").value = p.allergies || "";
+  document.getElementById("p-emergency").value = p.emergency_contact || "";
+  showModal();
+};
+
+document.getElementById("patient-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = document.getElementById("p-id").value;
+  const payload = {
+    full_name: document.getElementById("p-name").value,
+    dob: document.getElementById("p-dob").value,
+    gender: document.getElementById("p-gender").value,
+    phone: document.getElementById("p-phone").value,
+    blood_group: document.getElementById("p-blood").value,
+    address: document.getElementById("p-address").value,
+    allergies: document.getElementById("p-allergies").value,
+    emergency_contact: document.getElementById("p-emergency").value,
+  };
+  try {
+    if (id) await Api.put(`/api/patients/${id}`, payload);
+    else await Api.post("/api/patients", payload);
+    hideModal();
+    loadPatients(document.getElementById("search-box").value);
+  } catch (err) {
+    document.getElementById("patient-error").textContent = err.message;
+  }
+});
+
+// ---------------- Detail / EHR modal ----------------
+const detailModal = document.getElementById("detail-modal");
+document.getElementById("detail-close-btn").addEventListener("click", () => detailModal.style.display = "none");
+
+window.openDetail = async function (id) {
+  try {
+    const p = await Api.get(`/api/patients/${id}`);
+    document.getElementById("detail-title").textContent = `${p.full_name} (${p.patient_code})`;
+    let html = `
+      <p><strong>DOB:</strong> ${fmtDate(p.dob)} &nbsp; <strong>Gender:</strong> ${escapeHtml(p.gender || "-")}</p>
+      <p><strong>Phone:</strong> ${escapeHtml(p.phone || "-")} &nbsp; <strong>Blood Group:</strong> ${escapeHtml(p.blood_group || "-")}</p>
+      <p><strong>Address:</strong> ${escapeHtml(p.address || "-")}</p>
+    `;
+    if (isClinical) {
+      html += `<p><strong>Allergies:</strong> ${escapeHtml(p.allergies || "None recorded")}</p>`;
+      html += `<div class="section-title">Medical Records / Visit History</div>`;
+      if (p.medical_records && p.medical_records.length) {
+        html += p.medical_records.map(r => `
+          <div class="card" style="margin-bottom:8px; padding:12px;">
+            <div style="font-size:12px; color:var(--text-muted);">${fmtDate(r.visit_date)} — Dr. ${escapeHtml(r.doctor_name || "N/A")}</div>
+            <div><strong>Diagnosis:</strong> ${escapeHtml(r.diagnosis || "-")}</div>
+            <div>${escapeHtml(r.notes || "")}</div>
+          </div>`).join("");
+      } else {
+        html += `<div class="empty-state">No visit history yet.</div>`;
+      }
+      if (["admin", "doctor"].includes(role)) {
+        html += `
+          <div class="section-title">Add Visit Note</div>
+          <textarea id="new-diagnosis" placeholder="Diagnosis"></textarea>
+          <textarea id="new-notes" placeholder="Notes" style="margin-top:8px;"></textarea>
+          <button class="primary" style="margin-top:8px;" onclick="addRecord(${id})">Save Note</button>
+        `;
+      }
+    } else {
+      html += `<p style="color:var(--text-muted); font-size:13px;">Clinical history is restricted to clinical staff.</p>`;
+    }
+    document.getElementById("detail-body").innerHTML = html;
+    detailModal.style.display = "flex";
+  } catch (err) { if (!handleAuthError(err)) alert(err.message); }
+};
+
+window.addRecord = async function (patientId) {
+  const diagnosis = document.getElementById("new-diagnosis").value;
+  const notes = document.getElementById("new-notes").value;
+  try {
+    await Api.post(`/api/patients/${patientId}/records`, { diagnosis, notes });
+    openDetail(patientId);
+  } catch (err) { alert(err.message); }
+};
+
+loadPatients();
+</script>
+{% endblock %}

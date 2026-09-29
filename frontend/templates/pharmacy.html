@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Pharmacy{% endblock %}
+{% block heading %}Pharmacy Management{% endblock %}
+{% block content %}
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="inventory">Drug Inventory</button>
+    <button class="tab-btn" data-tab="prescriptions">Prescriptions</button>
+  </div>
+
+  <div id="tab-inventory">
+    <div class="toolbar">
+      <div></div>
+      <button class="primary" id="add-drug-btn">+ Add Drug</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Drug</th><th>Manufacturer</th><th>Unit Price</th><th>Stock</th><th>Reorder Level</th><th>Expiry</th><th></th></tr></thead>
+        <tbody id="drugs-body"><tr><td colspan="7">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="tab-prescriptions" style="display:none;">
+    <div class="toolbar">
+      <div></div>
+      <button class="primary" id="add-rx-btn">+ New Prescription</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Patient</th><th>Drug</th><th>Qty</th><th>Doctor</th><th>Status</th><th></th></tr></thead>
+        <tbody id="rx-body"><tr><td colspan="6">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Add Drug Modal -->
+  <div class="modal-overlay" id="drug-modal" style="display:none;">
+    <div class="modal">
+      <h2>Add Drug</h2>
+      <form id="drug-form">
+        <div class="form-row"><label>Name *</label><input type="text" id="dr-name" required></div>
+        <div class="form-row"><label>Manufacturer</label><input type="text" id="dr-mfr"></div>
+        <div class="two-col">
+          <div class="form-row"><label>Unit Price</label><input type="number" step="0.01" id="dr-price" value="0"></div>
+          <div class="form-row"><label>Stock Qty</label><input type="number" id="dr-stock" value="0"></div>
+        </div>
+        <div class="two-col">
+          <div class="form-row"><label>Reorder Level</label><input type="number" id="dr-reorder" value="10"></div>
+          <div class="form-row"><label>Expiry Date</label><input type="date" id="dr-expiry"></div>
+        </div>
+        <div class="error-text" id="drug-error"></div>
+        <div class="modal-actions">
+          <button type="button" id="drug-cancel-btn">Cancel</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- New Prescription Modal -->
+  <div class="modal-overlay" id="rx-modal" style="display:none;">
+    <div class="modal">
+      <h2>New Prescription</h2>
+      <form id="rx-form">
+        <div class="form-row"><label>Patient *</label><select id="rx-patient" required></select></div>
+        <div class="form-row"><label>Drug *</label><select id="rx-drug" required></select></div>
+        <div class="two-col">
+          <div class="form-row"><label>Quantity *</label><input type="number" id="rx-qty" min="1" value="1" required></div>
+          <div class="form-row" id="rx-doctor-row"><label>Doctor *</label><select id="rx-doctor"></select></div>
+        </div>
+        <div class="form-row"><label>Dosage Instructions</label><input type="text" id="rx-dosage" placeholder="e.g. 1 tablet twice daily"></div>
+        <div class="error-text" id="rx-error"></div>
+        <div class="modal-actions">
+          <button type="button" id="rx-cancel-btn">Cancel</button>
+          <button type="submit" class="primary">Prescribe</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+const role = "{{ role }}";
+const canManageDrugs = ["admin", "pharmacist"].includes(role);
+const canPrescribe = ["admin", "doctor"].includes(role);
+let drugs = [];
+
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("tab-inventory").style.display = btn.dataset.tab === "inventory" ? "block" : "none";
+    document.getElementById("tab-prescriptions").style.display = btn.dataset.tab === "prescriptions" ? "block" : "none";
+  });
+});
+if (!canManageDrugs) document.getElementById("add-drug-btn").style.display = "none";
+if (!canPrescribe) document.getElementById("add-rx-btn").style.display = "none";
+
+async function loadDrugs() {
+  try {
+    drugs = await Api.get("/api/pharmacy/drugs");
+    document.getElementById("drugs-body").innerHTML = drugs.length ? drugs.map(d => `
+      <tr>
+        <td>${escapeHtml(d.name)}</td>
+        <td>${escapeHtml(d.manufacturer || "-")}</td>
+        <td>${fmtMoney(d.unit_price)}</td>
+        <td>${d.stock_qty <= d.reorder_level ? badge(d.stock_qty, "red") : d.stock_qty}</td>
+        <td>${d.reorder_level}</td>
+        <td>${fmtDate(d.expiry_date)}</td>
+        <td>${canManageDrugs ? `<button class="small" onclick="openEditDrug(${d.id})">Edit</button>` : ""}</td>
+      </tr>`).join("") : `<tr><td colspan="7" class="empty-state">No drugs in inventory</td></tr>`;
+  } catch (err) { if (!handleAuthError(err)) alert(err.message); }
+}
+
+async function loadRx() {
+  try {
+    const rx = await Api.get("/api/pharmacy/prescriptions");
+    document.getElementById("rx-body").innerHTML = rx.length ? rx.map(r => `
+      <tr>
+        <td>${escapeHtml(r.patient_name)} <span style="color:var(--text-muted); font-size:12px;">(${escapeHtml(r.patient_code)})</span></td>
+        <td>${escapeHtml(r.drug_name)}</td>
+        <td>${r.quantity}</td>
+        <td>Dr. ${escapeHtml(r.doctor_name)}</td>
+        <td>${badge(r.status, statusColor(r.status))}</td>
+        <td>${r.status === "Pending" && canManageDrugs ? `<button class="small primary" onclick="dispense(${r.id})">Dispense</button>` : ""}</td>
+      </tr>`).join("") : `<tr><td colspan="6" class="empty-state">No prescriptions yet</td></tr>`;
+  } catch (err) { if (!handleAuthError(err)) alert(err.message); }
+}
+
+window.dispense = async function (id) {
+  try { await Api.post(`/api/pharmacy/prescriptions/${id}/dispense`, {}); loadRx(); loadDrugs(); }
+  catch (err) { alert(err.message); }
+};
+
+// ---------------- Drug modal ----------------
+const drugModal = document.getElementById("drug-modal");
+document.getElementById("add-drug-btn").addEventListener("click", () => {
+  document.getElementById("drug-form").reset();
+  document.getElementById("drug-error").textContent = "";
+  document.getElementById("dr-name").dataset.id = "";
+  drugModal.style.display = "flex";
+});
+document.getElementById("drug-cancel-btn").addEventListener("click", () => drugModal.style.display = "none");
+
+window.openEditDrug = function (id) {
+  const d = drugs.find(x => x.id === id);
+  if (!d) return;
+  document.getElementById("dr-name").value = d.name;
+  document.getElementById("dr-name").dataset.id = d.id;
+  document.getElementById("dr-mfr").value = d.manufacturer || "";
+  document.getElementById("dr-price").value = d.unit_price;
+  document.getElementById("dr-stock").value = d.stock_qty;
+  document.getElementById("dr-reorder").value = d.reorder_level;
+  document.getElementById("dr-expiry").value = d.expiry_date || "";
+  drugModal.style.display = "flex";
+};
+
+document.getElementById("drug-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = document.getElementById("dr-name").dataset.id;
+  const payload = {
+    name: document.getElementById("dr-name").value,
+    manufacturer: document.getElementById("dr-mfr").value,
+    unit_price: Number(document.getElementById("dr-price").value),
+    stock_qty: Number(document.getElementById("dr-stock").value),
+    reorder_level: Number(document.getElementById("dr-reorder").value),
+    expiry_date: document.getElementById("dr-expiry").value,
+  };
+  try {
+    if (id) await Api.put(`/api/pharmacy/drugs/${id}`, payload);
+    else await Api.post("/api/pharmacy/drugs", payload);
+    drugModal.style.display = "none";
+    loadDrugs();
+  } catch (err) { document.getElementById("drug-error").textContent = err.message; }
+});
+
+// ---------------- Prescription modal ----------------
+const rxModal = document.getElementById("rx-modal");
+document.getElementById("add-rx-btn").addEventListener("click", async () => {
+  document.getElementById("rx-form").reset();
+  document.getElementById("rx-error").textContent = "";
+  const [patients, dr] = await Promise.all([Api.get("/api/patients"), Api.get("/api/pharmacy/drugs")]);
+  document.getElementById("rx-patient").innerHTML = patients.map(p => `<option value="${p.id}">${escapeHtml(p.full_name)} (${p.patient_code})</option>`).join("");
+  document.getElementById("rx-drug").innerHTML = dr.map(d => `<option value="${d.id}">${escapeHtml(d.name)} (stock: ${d.stock_qty})</option>`).join("");
+  if (role === "doctor") {
+    document.getElementById("rx-doctor-row").style.display = "none";
+  } else {
+    document.getElementById("rx-doctor-row").style.display = "block";
+    const doctors = await Api.get("/api/doctors");
+    document.getElementById("rx-doctor").innerHTML = doctors.map(d => `<option value="${d.id}">Dr. ${escapeHtml(d.full_name)}</option>`).join("");
+  }
+  rxModal.style.display = "flex";
+});
+document.getElementById("rx-cancel-btn").addEventListener("click", () => rxModal.style.display = "none");
+
+document.getElementById("rx-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const payload = {
+    patient_id: Number(document.getElementById("rx-patient").value),
+    drug_id: Number(document.getElementById("rx-drug").value),
+    quantity: Number(document.getElementById("rx-qty").value),
+    dosage_instructions: document.getElementById("rx-dosage").value,
+    doctor_id: role === "doctor" ? undefined : Number(document.getElementById("rx-doctor").value),
+  };
+  try {
+    await Api.post("/api/pharmacy/prescriptions", payload);
+    rxModal.style.display = "none";
+    loadRx();
+  } catch (err) { document.getElementById("rx-error").textContent = err.message; }
+});
+
+loadDrugs();
+loadRx();
+</script>
+{% endblock %}

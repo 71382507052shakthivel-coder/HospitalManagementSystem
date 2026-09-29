@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Billing{% endblock %}
+{% block heading %}Billing &amp; Finance{% endblock %}
+{% block content %}
+  <div class="toolbar">
+    <div></div>
+    <button class="primary" id="add-bill-btn">+ New Invoice</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Invoice #</th><th>Patient</th><th>Total</th><th>Paid</th><th>Status</th><th>Insurance</th><th></th></tr></thead>
+      <tbody id="bills-body"><tr><td colspan="7">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- New Invoice Modal -->
+  <div class="modal-overlay" id="bill-modal" style="display:none;">
+    <div class="modal" style="width:520px;">
+      <h2>New Invoice</h2>
+      <form id="bill-form">
+        <div class="form-row"><label>Patient *</label><select id="b-patient" required></select></div>
+        <div class="form-row"><label>Insurance Provider (optional)</label><input type="text" id="b-insurance"></div>
+        <div class="section-title" style="margin-top:12px;">Line Items</div>
+        <div id="items-container"></div>
+        <button type="button" class="small" id="add-item-btn">+ Add Item</button>
+        <div style="text-align:right; margin-top:10px; font-weight:700;">Total: <span id="bill-total">₹0.00</span></div>
+        <div class="error-text" id="bill-error"></div>
+        <div class="modal-actions">
+          <button type="button" id="bill-cancel-btn">Cancel</button>
+          <button type="submit" class="primary">Create Invoice</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Payment Modal -->
+  <div class="modal-overlay" id="pay-modal" style="display:none;">
+    <div class="modal">
+      <h2>Record Payment</h2>
+      <form id="pay-form">
+        <input type="hidden" id="pay-bill-id">
+        <div class="form-row"><label>Amount *</label><input type="number" id="pay-amount" min="0.01" step="0.01" required></div>
+        <div class="error-text" id="pay-error"></div>
+        <div class="modal-actions">
+          <button type="button" id="pay-cancel-btn">Cancel</button>
+          <button type="submit" class="primary">Record Payment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+let bills = [];
+
+async function loadBills() {
+  try {
+    bills = await Api.get("/api/bills");
+    document.getElementById("bills-body").innerHTML = bills.length ? bills.map(b => `
+      <tr>
+        <td>${escapeHtml(b.bill_no)}</td>
+        <td>${escapeHtml(b.patient_name)} <span style="color:var(--text-muted); font-size:12px;">(${escapeHtml(b.patient_code)})</span></td>
+        <td>${fmtMoney(b.total_amount)}</td>
+        <td>${fmtMoney(b.paid_amount)}</td>
+        <td>${badge(b.status, statusColor(b.status))}</td>
+        <td>${b.insurance_provider ? escapeHtml(b.insurance_provider) + " — " + badge(b.insurance_claim_status || "Pending", "yellow") : "-"}</td>
+        <td>${b.status !== "Paid" ? `<button class="small primary" onclick="openPay(${b.id})">Record Payment</button>` : ""}</td>
+      </tr>`).join("") : `<tr><td colspan="7" class="empty-state">No invoices yet</td></tr>`;
+  } catch (err) { if (!handleAuthError(err)) alert(err.message); }
+}
+
+// ---------------- New invoice ----------------
+const billModal = document.getElementById("bill-modal");
+let itemCount = 0;
+
+function addItemRow() {
+  itemCount++;
+  const div = document.createElement("div");
+  div.className = "form-row item-row";
+  div.style = "display:flex; gap:8px; align-items:center;";
+  div.innerHTML = `
+    <input type="text" placeholder="Description" class="item-desc" style="flex:2;">
+    <input type="number" placeholder="Qty" class="item-qty" value="1" min="1" style="flex:1;">
+    <input type="number" placeholder="Unit Price" class="item-price" value="0" min="0" step="0.01" style="flex:1;">
+    <button type="button" class="small danger" onclick="this.parentElement.remove(); recalcTotal();">✕</button>
+  `;
+  document.getElementById("items-container").appendChild(div);
+  div.querySelectorAll("input").forEach(inp => inp.addEventListener("input", recalcTotal));
+}
+
+function recalcTotal() {
+  let total = 0;
+  document.querySelectorAll(".item-row").forEach(row => {
+    const qty = Number(row.querySelector(".item-qty").value || 0);
+    const price = Number(row.querySelector(".item-price").value || 0);
+    total += qty * price;
+  });
+  document.getElementById("bill-total").textContent = fmtMoney(total);
+}
+
+document.getElementById("add-item-btn").addEventListener("click", addItemRow);
+
+document.getElementById("add-bill-btn").addEventListener("click", async () => {
+  document.getElementById("bill-form").reset();
+  document.getElementById("bill-error").textContent = "";
+  document.getElementById("items-container").innerHTML = "";
+  addItemRow();
+  recalcTotal();
+  const patients = await Api.get("/api/patients");
+  document.getElementById("b-patient").innerHTML = patients.map(p => `<option value="${p.id}">${escapeHtml(p.full_name)} (${p.patient_code})</option>`).join("");
+  billModal.style.display = "flex";
+});
+document.getElementById("bill-cancel-btn").addEventListener("click", () => billModal.style.display = "none");
+
+document.getElementById("bill-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const items = [...document.querySelectorAll(".item-row")].map(row => ({
+    description: row.querySelector(".item-desc").value || "Item",
+    quantity: Number(row.querySelector(".item-qty").value || 1),
+    unit_price: Number(row.querySelector(".item-price").value || 0),
+  }));
+  const payload = {
+    patient_id: Number(document.getElementById("b-patient").value),
+    insurance_provider: document.getElementById("b-insurance").value || null,
+    items,
+  };
+  try {
+    await Api.post("/api/bills", payload);
+    billModal.style.display = "none";
+    loadBills();
+  } catch (err) { document.getElementById("bill-error").textContent = err.message; }
+});
+
+// ---------------- Payment ----------------
+const payModal = document.getElementById("pay-modal");
+window.openPay = function (billId) {
+  document.getElementById("pay-form").reset();
+  document.getElementById("pay-error").textContent = "";
+  document.getElementById("pay-bill-id").value = billId;
+  payModal.style.display = "flex";
+};
+document.getElementById("pay-cancel-btn").addEventListener("click", () => payModal.style.display = "none");
+
+document.getElementById("pay-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const billId = document.getElementById("pay-bill-id").value;
+  const amount = Number(document.getElementById("pay-amount").value);
+  try {
+    await Api.post(`/api/bills/${billId}/pay`, { amount });
+    payModal.style.display = "none";
+    loadBills();
+  } catch (err) { document.getElementById("pay-error").textContent = err.message; }
+});
+
+loadBills();
+</script>
+{% endblock %}

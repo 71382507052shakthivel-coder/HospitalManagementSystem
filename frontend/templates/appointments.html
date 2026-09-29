@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Appointments{% endblock %}
+{% block heading %}Appointment Scheduling{% endblock %}
+{% block content %}
+  <div class="toolbar">
+    <input type="date" id="date-filter">
+    <button class="primary" id="add-appt-btn">+ New Appointment</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Date</th><th>Time</th><th>Patient</th><th>Doctor</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+      <tbody id="appt-body"><tr><td colspan="7">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="modal-overlay" id="appt-modal" style="display:none;">
+    <div class="modal">
+      <h2>New Appointment</h2>
+      <form id="appt-form">
+        <div class="form-row"><label>Patient *</label><select id="a-patient" required></select></div>
+        <div class="form-row"><label>Doctor *</label><select id="a-doctor" required></select></div>
+        <div class="two-col">
+          <div class="form-row"><label>Date *</label><input type="date" id="a-date" required></div>
+          <div class="form-row"><label>Time *</label><input type="time" id="a-time" required></div>
+        </div>
+        <div class="form-row"><label>Reason</label><input type="text" id="a-reason"></div>
+        <div class="error-text" id="appt-error"></div>
+        <div class="modal-actions">
+          <button type="button" id="appt-cancel-btn">Cancel</button>
+          <button type="submit" class="primary">Book Appointment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+const role = "{{ role }}";
+const canManage = ["admin", "receptionist", "doctor", "nurse"].includes(role);
+let appts = [];
+
+async function loadAppts() {
+  const date = document.getElementById("date-filter").value;
+  try {
+    appts = await Api.get(date ? `/api/appointments?date=${date}` : "/api/appointments");
+    render();
+  } catch (err) { if (!handleAuthError(err)) alert(err.message); }
+}
+
+function render() {
+  const body = document.getElementById("appt-body");
+  body.innerHTML = appts.length ? appts.map(a => `
+    <tr>
+      <td>${fmtDate(a.appt_date)}</td>
+      <td>${escapeHtml(a.appt_time)}</td>
+      <td>${escapeHtml(a.patient_name)} <span style="color:var(--text-muted); font-size:12px;">(${escapeHtml(a.patient_code)})</span></td>
+      <td>Dr. ${escapeHtml(a.doctor_name)} <span style="color:var(--text-muted); font-size:12px;">${escapeHtml(a.specialization)}</span></td>
+      <td>${escapeHtml(a.reason || "-")}</td>
+      <td>${badge(a.status, statusColor(a.status))}</td>
+      <td>
+        ${a.status === "Scheduled" && canManage ? `
+          <button class="small" onclick="setStatus(${a.id}, 'Completed')">Complete</button>
+          <button class="small danger" onclick="setStatus(${a.id}, 'Cancelled')">Cancel</button>
+        ` : ""}
+      </td>
+    </tr>`).join("") : `<tr><td colspan="7" class="empty-state">No appointments found</td></tr>`;
+}
+
+window.setStatus = async function (id, status) {
+  try { await Api.put(`/api/appointments/${id}`, { status }); loadAppts(); }
+  catch (err) { alert(err.message); }
+};
+
+document.getElementById("date-filter").addEventListener("change", loadAppts);
+
+const modal = document.getElementById("appt-modal");
+document.getElementById("add-appt-btn").addEventListener("click", async () => {
+  document.getElementById("appt-form").reset();
+  document.getElementById("appt-error").textContent = "";
+  const [patients, doctors] = await Promise.all([Api.get("/api/patients"), Api.get("/api/doctors")]);
+  document.getElementById("a-patient").innerHTML = patients.map(p => `<option value="${p.id}">${escapeHtml(p.full_name)} (${p.patient_code})</option>`).join("");
+  document.getElementById("a-doctor").innerHTML = doctors.map(d => `<option value="${d.id}">Dr. ${escapeHtml(d.full_name)} — ${escapeHtml(d.specialization)}</option>`).join("");
+  modal.style.display = "flex";
+});
+document.getElementById("appt-cancel-btn").addEventListener("click", () => modal.style.display = "none");
+
+document.getElementById("appt-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const payload = {
+    patient_id: Number(document.getElementById("a-patient").value),
+    doctor_id: Number(document.getElementById("a-doctor").value),
+    appt_date: document.getElementById("a-date").value,
+    appt_time: document.getElementById("a-time").value,
+    reason: document.getElementById("a-reason").value,
+  };
+  try {
+    await Api.post("/api/appointments", payload);
+    modal.style.display = "none";
+    loadAppts();
+  } catch (err) { document.getElementById("appt-error").textContent = err.message; }
+});
+
+loadAppts();
+</script>
+{% endblock %}

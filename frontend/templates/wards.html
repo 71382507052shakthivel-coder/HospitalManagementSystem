@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Wards{% endblock %}
+{% block heading %}Ward &amp; Bed Management{% endblock %}
+{% block content %}
+  <div id="wards-container"><div class="card">Loading...</div></div>
+
+  <div class="modal-overlay" id="admit-modal" style="display:none;">
+    <div class="modal">
+      <h2>Admit Patient</h2>
+      <form id="admit-form">
+        <input type="hidden" id="ad-bed-id">
+        <div class="form-row"><label>Patient *</label><select id="ad-patient" required></select></div>
+        <div class="error-text" id="admit-error"></div>
+        <div class="modal-actions">
+          <button type="button" id="admit-cancel-btn">Cancel</button>
+          <button type="submit" class="primary">Admit</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+const role = "{{ role }}";
+const canManage = ["admin", "nurse", "receptionist"].includes(role);
+
+async function loadWards() {
+  try {
+    const wards = await Api.get("/api/wards");
+    document.getElementById("wards-container").innerHTML = wards.map(w => `
+      <div class="card" style="margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-weight:700; font-size:16px;">${escapeHtml(w.name)} <span style="color:var(--text-muted); font-weight:400; font-size:13px;">(${escapeHtml(w.ward_type || "General")})</span></div>
+            <div style="color:var(--text-muted); font-size:13px;">${w.occupied} occupied / ${w.capacity} beds &middot; ${w.available} available</div>
+          </div>
+        </div>
+        <div class="bed-grid">
+          ${w.beds.map(b => `
+            <div class="bed ${b.status}" title="${b.status}${b.patient_name ? ' — ' + escapeHtml(b.patient_name) : ''}"
+                 onclick="bedClicked(${b.id}, '${b.status}')">
+              ${escapeHtml(b.bed_number)}
+            </div>`).join("")}
+        </div>
+      </div>`).join("");
+  } catch (err) { if (!handleAuthError(err)) alert(err.message); }
+}
+
+window.bedClicked = async function (bedId, status) {
+  if (!canManage) return;
+  if (status === "Available") {
+    document.getElementById("admit-form").reset();
+    document.getElementById("admit-error").textContent = "";
+    document.getElementById("ad-bed-id").value = bedId;
+    const patients = await Api.get("/api/patients");
+    document.getElementById("ad-patient").innerHTML = patients.map(p => `<option value="${p.id}">${escapeHtml(p.full_name)} (${p.patient_code})</option>`).join("");
+    document.getElementById("admit-modal").style.display = "flex";
+  } else if (status === "Occupied") {
+    if (confirm("Discharge patient from this bed?")) {
+      try { await Api.post(`/api/wards/beds/${bedId}/discharge`, {}); loadWards(); }
+      catch (err) { alert(err.message); }
+    }
+  } else {
+    if (confirm(`Mark this bed as ready (Available)? Currently: ${status}`)) {
+      try { await Api.post(`/api/wards/beds/${bedId}/ready`, {}); loadWards(); }
+      catch (err) { alert(err.message); }
+    }
+  }
+};
+
+document.getElementById("admit-cancel-btn").addEventListener("click", () => document.getElementById("admit-modal").style.display = "none");
+document.getElementById("admit-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const bedId = document.getElementById("ad-bed-id").value;
+  const patientId = Number(document.getElementById("ad-patient").value);
+  try {
+    await Api.post(`/api/wards/beds/${bedId}/admit`, { patient_id: patientId });
+    document.getElementById("admit-modal").style.display = "none";
+    loadWards();
+  } catch (err) { document.getElementById("admit-error").textContent = err.message; }
+});
+
+loadWards();
+</script>
+{% endblock %}

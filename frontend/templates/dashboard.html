@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block heading %}Dashboard{% endblock %}
+{% block content %}
+  <div class="grid cols-4" id="stat-cards">
+    <div class="card">Loading...</div>
+  </div>
+
+  <div class="two-col" style="margin-top:24px;">
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">Bed Occupancy</div>
+      <div id="occupancy-summary" style="color:var(--text-muted); font-size:14px;">Loading...</div>
+    </div>
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">Recent Activity</div>
+      <table>
+        <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Entity</th></tr></thead>
+        <tbody id="activity-body"><tr><td colspan="4">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(async function () {
+  try {
+    const s = await Api.get("/api/dashboard/stats");
+
+    const cards = [
+      { label: "Total Patients", value: s.total_patients, cls: "" },
+      { label: "Active Doctors", value: s.total_doctors, cls: "" },
+      { label: "Today's Appointments", value: s.todays_appointments, cls: "" },
+      { label: "Pending Bills", value: s.pending_bills, cls: s.pending_bills > 0 ? "warn" : "ok" },
+      { label: "Revenue Collected Today", value: fmtMoney(s.revenue_today), cls: "ok" },
+      { label: "Low Stock Drugs", value: s.low_stock_drugs, cls: s.low_stock_drugs > 0 ? "danger" : "ok" },
+      { label: "Pending Lab Tests", value: s.pending_lab_tests, cls: "warn" },
+      { label: "Pending Prescriptions", value: s.pending_prescriptions, cls: "warn" },
+    ];
+    document.getElementById("stat-cards").innerHTML = cards.map(c => `
+      <div class="stat-card ${c.cls}">
+        <div class="label">${c.label}</div>
+        <div class="value">${c.value}</div>
+      </div>`).join("");
+
+    document.getElementById("occupancy-summary").innerHTML = `
+      <div style="font-size:32px; font-weight:700; color:var(--primary-dark);">${s.bed_occupancy_pct}%</div>
+      <div>${s.beds_occupied} of ${s.beds_total} beds occupied hospital-wide.</div>
+      <div style="margin-top:10px;"><a href="/wards">View ward &amp; bed details →</a></div>
+    `;
+
+    const rows = s.recent_activity.map(a => `
+      <tr>
+        <td>${fmtDate(a.timestamp)} ${a.timestamp.split("T")[1] || ""}</td>
+        <td>${escapeHtml(a.username || "system")}</td>
+        <td>${escapeHtml(a.action)}</td>
+        <td>${escapeHtml(a.entity || "")} ${a.entity_id ? "#" + a.entity_id : ""}</td>
+      </tr>`).join("");
+    document.getElementById("activity-body").innerHTML = rows || `<tr><td colspan="4">No recent activity</td></tr>`;
+  } catch (err) {
+    if (!handleAuthError(err)) console.error(err);
+  }
+})();
+</script>
+{% endblock %}
